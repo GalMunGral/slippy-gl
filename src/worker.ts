@@ -34,7 +34,7 @@ async function compileTile(
   let vectorTile: VectorTile | undefined;
   try {
     const res = await fetch(
-      `https:/api.mapbox.com/v4/${sourceId}/${z}/${x}/${y}.vector.pbf?access_token=${TOKEN}`
+      `https://api.mapbox.com/v4/${sourceId}/${z}/${x}/${y}.vector.pbf?access_token=${TOKEN}`
     );
     vectorTile = new VectorTile(new Protobuf(await res.arrayBuffer()));
   } catch (e) {
