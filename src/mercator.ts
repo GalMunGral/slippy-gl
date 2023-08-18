@@ -19,9 +19,3 @@ export function latFromMercatorY(y: number): number {
   const y2 = 180 - y * 360;
   return (360 / Math.PI) * Math.atan(Math.exp((y2 * Math.PI) / 180)) - 90;
 }
-
-export function fromLngLat(lngLat) {
-  const x = -1 + mercatorXfromLng(lngLat[0]) * 2;
-  const y = 1 - mercatorYfromLat(lngLat[1]) * 2;
-  return [x, y];
-}

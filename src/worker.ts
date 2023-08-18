@@ -1,82 +1,61 @@
 import Protobuf from "pbf";
 import earcut from "earcut";
 import { VectorTile, VectorTileFeature } from "@mapbox/vector-tile";
-import { fromLngLat } from "./mercator";
-import type { CompiledTileFeatures } from "./types";
+import { mercatorXfromLng, mercatorYfromLat } from "./mercator";
+import type { CompiledTileFeature } from "./types";
 // @ts-ignore
 import { TOKEN } from "env";
 
 const sourceId = "mapbox.country-boundaries-v1";
-type FeatureClasse =
-  | "wood"
-  | "scrub"
-  | "grass"
-  | "crop"
-  | "snow"
-  | "shadow"
-  | "highlight";
+
+let lastRequestedZ = -1;
 
 addEventListener("message", async (event) => {
   const { x, y, z } = event.data as { x: number; y: number; z: number };
-  const compiled = await compileTile(x, y, z);
-  if (compiled) self.postMessage(compiled);
+  compileTile(x, y, z);
 });
 
-async function compileTile(
-  x: number,
-  y: number,
-  z: number
-): Promise<CompiledTileFeatures | null> {
-  const tileId = `${x}-${y}-${z}`;
+async function compileTile(x: number, y: number, z: number) {
+  lastRequestedZ = z;
 
-  const compiledFeatures: CompiledTileFeatures = [];
-
-  let vectorTile: VectorTile | undefined;
   try {
-    const res = await fetch(
-      `https://api.mapbox.com/v4/${sourceId}/${z}/${x}/${y}.vector.pbf?access_token=${TOKEN}`
-    );
-    vectorTile = new VectorTile(new Protobuf(await res.arrayBuffer()));
+    const data = await (
+      await fetch(
+        `https://api.mapbox.com/v4/${sourceId}/${z}/${x}/${y}.vector.pbf?access_token=${TOKEN}`
+      )
+    ).arrayBuffer();
+
+    // bail out if the zoom level changed after the tile was requested
+    if (z != lastRequestedZ || !data) {
+      self.postMessage({ type: "abort", x, y, z });
+      return;
+    }
+
+    const compiled: Array<CompiledTileFeature> = [];
+    const vectorTile = new VectorTile(new Protobuf(data));
+    for (const [key, layer] of Object.entries(vectorTile.layers)) {
+      for (let i = 0; i < layer.length; ++i) {
+        compiled.push(compileFeature(layer.feature(i), x, y, z));
+      }
+    }
+    self.postMessage({ type: "done", data: compiled });
   } catch (e) {
     console.debug(e);
-    return null;
   }
 
-  function colorMap(feature: VectorTileFeature) {
-    switch (feature.properties.class as FeatureClasse) {
-      case "crop":
-        return [0.2, 0.5, 0.2];
-      case "grass":
-        return [0.1, 0.5, 0];
-      case "scrub":
-        return [0.2, 0.4, 0];
-      case "snow":
-        return [1, 1, 1];
-      case "wood":
-        return [0.01, 0.4, 0.01];
-      case "shadow":
-      case "highlight":
-        let c = ((feature.properties.level as number) - 56) / (94 - 56);
-        return Array(3).fill(c);
-      default:
-        return [100, 100, 200].map((m) => (feature.id % m) / m);
-    }
-  }
-
-  function compileFeature(feature: VectorTileFeature) {
+  function compileFeature(
+    feature: VectorTileFeature,
+    x: number,
+    y: number,
+    z: number
+  ) {
+    const tileId = `${x}-${y}-${z}`;
     const featureId = feature.id;
     const geojson = feature.toGeoJSON(x, y, z);
 
+    const color = [50, 100, 100].map((m) => (0.5 + 0.5 * (feature.id % m)) / m);
     const triangles: Array<number> = [];
     const vertices: Array<number> = [];
-
-    function compile(rings: Array<Array<Array<number>>>) {
-      const data = earcut.flatten(rings.map((ring) => ring.map(fromLngLat)));
-      const base = vertices.length / 2;
-      vertices.push(...data.vertices);
-      const tri = earcut(data.vertices, data.holes, data.dimensions);
-      triangles.push(...tri.map((i) => i + base));
-    }
 
     switch (geojson.geometry.type) {
       case "Polygon":
@@ -87,21 +66,22 @@ async function compileTile(
         break;
       case "LineString":
       case "MultiLineString":
-        console.log("not implemented");
       default:
-      // console.log(geojson.geometry.type);
+        console.log("not implemented");
     }
 
-    const color = colorMap(feature);
+    return { tileId, featureId, color, vertices, triangles };
 
-    compiledFeatures.push({ tileId, featureId, color, vertices, triangles });
-  }
-
-  for (const [key, layer] of Object.entries(vectorTile.layers)) {
-    for (let i = 0; i < layer.length; ++i) {
-      compileFeature(layer.feature(i));
+    function compile(rings: Array<Array<Array<number>>>) {
+      const data = earcut.flatten(
+        rings.map((ring) =>
+          ring.map((v) => [mercatorXfromLng(v[0]), mercatorYfromLat(v[1])])
+        )
+      );
+      const base = vertices.length / 2;
+      vertices.push(...data.vertices);
+      const tri = earcut(data.vertices, data.holes, data.dimensions);
+      triangles.push(...tri.map((i) => i + base));
     }
   }
-
-  return compiledFeatures;
 }

@@ -1,11 +1,11 @@
-import { mat2d, mat3, vec2, vec3 } from "gl-matrix";
-import tilebelt from "@mapbox/tilebelt";
-import { latFromMercatorY, lngFromMercatorX } from "./mercator";
-import type { CompiledTileFeatures } from "./types";
+import { mat2d, vec2 } from "gl-matrix";
+import type { CompiledTileFeature } from "./types";
 
-let cameraX = 0;
-let cameraY = 0.2;
-let zoom = 0;
+const worker = new Worker("worker.js");
+
+let cameraX = 0.5;
+let cameraY = 0.5;
+let zoom = 2;
 
 const WIDTH = window.innerWidth;
 const HEIGHT = window.innerHeight;
@@ -80,7 +80,7 @@ const program = createWebGLProgram(
   out vec4 fragColor;
 
   void main() {
-    fragColor = vec4(color * 0.3 + 0.2, 1);
+    fragColor = vec4(color, 1);
   }
     `
 );
@@ -94,11 +94,13 @@ const V = Array(N)
   .map(() => vec2.create());
 
 function makeMatrix(cameraX: number, cameraY: number, zoom: number): mat2d {
-  const aspectRatio = WIDTH / HEIGHT;
   const m1 = mat2d.fromTranslation(M[0], vec2.fromValues(-cameraX, -cameraY));
   const m2 = mat2d.fromScaling(
     M[1],
-    vec2.fromValues(2 ** zoom, 2 ** zoom * aspectRatio)
+    vec2.fromValues(
+      2 ** zoom / (WIDTH / 2 / 256),
+      2 ** zoom / -(HEIGHT / 2 / 256)
+    )
   );
   return mat2d.mul(M[2], m2, m1);
 }
@@ -121,38 +123,26 @@ canvas.addEventListener("mouseleave", () => {
 });
 canvas.addEventListener("mousemove", (e) => {
   if (isMoving) {
-    cameraX -= (e.clientX - prevX) / (WIDTH / 2) / 2 ** zoom;
-    cameraY -= (prevY - e.clientY) / (HEIGHT / 2) / 2 ** zoom;
-    wrapCamera();
+    cameraX += (prevX - e.clientX) / 256 / 2 ** zoom;
+    cameraY += (prevY - e.clientY) / 256 / 2 ** zoom;
     prevX = e.clientX;
     prevY = e.clientY;
   }
 });
 
-function wrapCamera() {
-  if (cameraX < -1) cameraX += 2;
-  if (cameraX >= 1) cameraX -= 2;
-  if (cameraY < -1) cameraY += 2;
-  if (cameraY >= 1) cameraY -= 2;
-}
+const MAX_ZOOM = 18;
 
 canvas.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
-    const newZoom = Math.max(0, Math.min(14, zoom - 0.005 * e.deltaY));
-    const p = vec2.fromValues(
-      -1 + 2 * (e.clientX / WIDTH),
-      1 - 2 * (e.clientY / HEIGHT)
-    );
-    const m1 = mat2d.invert(M[3], makeMatrix(cameraX, cameraY, zoom));
-    const m2 = mat2d.invert(M[4], makeMatrix(cameraX, cameraY, newZoom));
-    const p1 = vec2.transformMat2d(V[0], p, m1);
-    const p2 = vec2.transformMat2d(V[1], p, m2);
-    const translation = vec2.sub(V[2], p1, p2);
-    cameraX += translation[0];
-    cameraY += translation[1];
-    wrapCamera();
+    const zoomDelta = -0.005 * e.deltaY;
+    const newZoom = Math.max(0, Math.min(MAX_ZOOM, zoom + zoomDelta));
+    const x = (e.clientX - WIDTH / 2) / 256;
+    const y = (e.clientY - HEIGHT / 2) / 256;
+    const scale = 2 ** (newZoom - zoom);
+    cameraX += (x * (scale - 1)) / 2 ** newZoom;
+    cameraY += (y * (scale - 1)) / 2 ** newZoom;
     zoom = newZoom;
   },
   { passive: false }
@@ -167,154 +157,113 @@ gl.enableVertexAttribArray(positionLoc);
 
 type Feature = {
   featureId: number;
-  drawCall(shiftX: number, shiftY: number): void;
+  drawCall(originX: number, originY: number): void;
 };
 
 const colorLoc = gl.getUniformLocation(program, "color");
 
 const tileCache: Record<string, Array<Feature>> = {};
 
-function compileTile(x: number, y: number, z: number): Array<Feature> {
+function compileDrawCall(feature: CompiledTileFeature) {
+  const { tileId, featureId, vertices, triangles, color } = feature;
+  const verticesBuf = gl.createBuffer();
+  const trianglesBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, trianglesBuf);
+  gl.bufferData(
+    gl.ELEMENT_ARRAY_BUFFER,
+    new Uint32Array(triangles),
+    gl.STATIC_DRAW
+  );
+
+  tileCache[tileId].push({
+    featureId,
+    drawCall(originX: number, originY: number) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuf);
+      gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, trianglesBuf);
+      const m = makeMatrix(cameraX - originX, cameraY - originY, zoom);
+      // prettier-ignore
+      gl.uniformMatrix3fv(gl.getUniformLocation(program, "M"), false, [
+        m[0], m[1], 0,
+        m[2], m[3], 0,
+        m[4], m[5], 1,
+      ]);
+      gl.uniform3fv(colorLoc, color);
+      gl.drawElements(gl.TRIANGLES, triangles.length, gl.UNSIGNED_INT, 0);
+    },
+  });
+}
+
+type WorkerMessage =
+  | {
+      type: "done";
+      data: Array<CompiledTileFeature>;
+    }
+  | {
+      type: "abort";
+      x: number;
+      y: number;
+      z: number;
+    };
+
+worker.addEventListener("message", (e: MessageEvent<WorkerMessage>) => {
+  const payload = e.data;
+  switch (payload.type) {
+    case "abort": {
+      const { x, y, z } = payload;
+      const key = `${x}-${y}-${z}`;
+      delete tileCache[key];
+      break;
+    }
+    case "done": {
+      requestIdleCallback(() => {
+        for (const feature of payload.data) {
+          compileDrawCall(feature);
+        }
+        const tileId = payload.data[0].tileId;
+        tileCache[tileId].sort((a, b) => (a.featureId < b.featureId ? -1 : 1));
+      });
+      break;
+    }
+  }
+});
+
+function loadTile(x: number, y: number, z: number): Array<Feature> {
   const key = `${x}-${y}-${z}`;
   if (!tileCache[key]) {
-    tileCache[key] = [];
-    const worker = new Worker("worker.js");
     worker.postMessage({ x, y, z });
-    worker.addEventListener(
-      "message",
-      (e: MessageEvent<CompiledTileFeatures>) => {
-        requestIdleCallback(() => {
-          for (const {
-            tileId,
-            featureId,
-            color,
-            vertices,
-            triangles,
-          } of e.data) {
-            const verticesBuf = gl.createBuffer();
-            const trianglesBuf = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuf);
-            gl.bufferData(
-              gl.ARRAY_BUFFER,
-              new Float32Array(vertices),
-              gl.STATIC_DRAW
-            );
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, trianglesBuf);
-            gl.bufferData(
-              gl.ELEMENT_ARRAY_BUFFER,
-              new Uint32Array(triangles),
-              gl.STATIC_DRAW
-            );
-
-            tileCache[tileId].push({
-              featureId,
-              drawCall(shiftX: number, shiftY: number) {
-                // console.log(shiftX, shiftY);
-                gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuf);
-                gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
-                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, trianglesBuf);
-                // TODO::::
-                const m = makeMatrix(
-                  cameraX + shiftX * 2,
-                  cameraY - shiftY * 2,
-                  zoom
-                );
-                gl.uniformMatrix3fv(
-                  gl.getUniformLocation(program, "M"),
-                  false,
-                  [m[0], m[1], 0, m[2], m[3], 0, m[4], m[5], 1]
-                );
-                gl.uniform3fv(colorLoc, color);
-                gl.drawElements(
-                  gl.TRIANGLES,
-                  triangles.length,
-                  gl.UNSIGNED_INT,
-                  0
-                );
-              },
-            });
-          }
-          tileCache[e.data[0].tileId].sort((a, b) =>
-            a.featureId < b.featureId ? -1 : 1
-          );
-          worker.terminate();
-        });
-      }
-    );
+    tileCache[key] = [];
   }
-  if (!tileCache[key].length && z > 0) {
-    return compileTile(x >> 1, y >> 1, z - 1);
-  }
-  return tileCache[key];
+  return tileCache[key].length > 0 || z == 0
+    ? tileCache[key]
+    : loadTile(x >> 1, y >> 1, z - 1);
 }
 
 requestAnimationFrame(function render() {
   gl.useProgram(program);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
-  const scale = WIDTH * 2 ** zoom;
-  const minMercatorX = mod(
-    (((1 + cameraX) / 2) * scale - WIDTH / 2) / scale,
-    1
-  );
-  const minLng = lngFromMercatorX(minMercatorX);
-  const maxMercatorX = mod(
-    (((1 + cameraX) / 2) * scale + WIDTH / 2) / scale,
-    1
-  );
-  const maxLng = lngFromMercatorX(maxMercatorX);
-  const minMercatorY = mod(
-    (((1 - cameraY) / 2) * scale - HEIGHT / 2) / scale,
-    1
-  );
-  const maxLat = latFromMercatorY(minMercatorY);
-  const maxMercatorY = mod(
-    (((1 - cameraY) / 2) * scale + HEIGHT / 2) / scale,
-    1
-  );
-  const minLat = latFromMercatorY(maxMercatorY);
+  const minX = -(WIDTH / 2) / 256 / 2 ** zoom + cameraX;
+  const maxX = WIDTH / 2 / 256 / 2 ** zoom + cameraX;
+  const minY = -(HEIGHT / 2) / 256 / 2 ** zoom + cameraY;
+  const maxY = HEIGHT / 2 / 256 / 2 ** zoom + cameraY;
 
-  // console.log("camera", cameraX, cameraY, zoom);
+  const Z = Math.floor(zoom);
+  const minTileX = Math.floor(minX * 2 ** Z);
+  const maxTileX = Math.floor(maxX * 2 ** Z);
+  const minTileY = Math.floor(minY * 2 ** Z);
+  const maxTileY = Math.floor(maxY * 2 ** Z);
 
-  // console.log("lonlat", minLng, maxLng, minLat, maxLat);
-
-  const z = Math.ceil(zoom);
-
-  const [centerX, centerY] = tilebelt.pointToTile(
-    lngFromMercatorX((1 + cameraX) / 2),
-    latFromMercatorY((1 - cameraY) / 2),
-    z
-  );
-
-  let [minX, minY] = tilebelt.pointToTile(minLng, maxLat, z);
-  let [maxX, maxY] = tilebelt.pointToTile(maxLng, minLat, z);
-
-  if (minX > centerX) minX -= 2 ** z;
-  if (maxX < centerX) maxX += 2 ** z;
-  if (minY > centerY) minY -= 2 ** z;
-  if (maxY < centerY) maxY += 2 ** z;
-
-  // console.log("camera", cameraX, cameraY);
-  // console.log("xy", minX, maxX, minY, maxY);
-  // console.log(
-  //   "xy",
-  //   mod(minX, 2 ** z),
-  //   mod(maxX, 2 ** z),
-  //   mod(minY, 2 ** z),
-  //   mod(maxY, 2 ** z)
-  // );
-
-  for (let x = minX - 1; x <= maxX + 1; x++) {
-    for (let y = minY - 1; y <= maxY + 1; y++) {
-      const normalizedX = mod(x, 2 ** z);
-      const normalizedY = mod(y, 2 ** z);
-      const tile = compileTile(normalizedX, normalizedY, z);
-      const deltaX = x - normalizedX;
-      const shiftX = deltaX ? -deltaX / Math.abs(deltaX) : 0;
-      const deltaY = y - normalizedY;
-      const shiftY = deltaY ? -deltaY / Math.abs(deltaY) : 0;
-      // console.log("delta", deltaX, deltaY);
-      tile.forEach((f) => f.drawCall(shiftX, shiftY));
+  for (let x = minTileX - 1; x <= maxTileX + 1; x++) {
+    for (let y = minTileY - 1; y <= maxTileY + 1; y++) {
+      const X = mod(x, 2 ** Z);
+      const Y = mod(y, 2 ** Z);
+      const tile = loadTile(X, Y, Z);
+      const originX = Math.floor(x / 2 ** Z);
+      const originY = Math.floor(y / 2 ** Z);
+      tile.forEach((f) => f.drawCall(originX, originY));
     }
   }
 
