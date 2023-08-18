@@ -1,3 +1,4 @@
+import { mat2d, mat3, vec2, vec3 } from "gl-matrix";
 import tilebelt from "@mapbox/tilebelt";
 import { latFromMercatorY, lngFromMercatorX } from "./mercator";
 import type { CompiledTileFeatures } from "./types";
@@ -5,8 +6,6 @@ import type { CompiledTileFeatures } from "./types";
 let cameraX = 0;
 let cameraY = 0.2;
 let zoom = 0;
-
-import * as THREE from "three";
 
 const WIDTH = window.innerWidth;
 const HEIGHT = window.innerHeight;
@@ -86,15 +85,22 @@ const program = createWebGLProgram(
     `
 );
 
-function makeMatrix(
-  cameraX: number,
-  cameraY: number,
-  zoom: number
-): THREE.Matrix3 {
+const N = 10;
+const M = Array(N)
+  .fill(0)
+  .map(() => mat2d.create());
+const V = Array(N)
+  .fill(0)
+  .map(() => vec2.create());
+
+function makeMatrix(cameraX: number, cameraY: number, zoom: number): mat2d {
   const aspectRatio = WIDTH / HEIGHT;
-  const m1 = new THREE.Matrix3().makeTranslation(-cameraX, -cameraY);
-  const m2 = new THREE.Matrix3().makeScale(2 ** zoom, 2 ** zoom * aspectRatio);
-  return m2.multiply(m1);
+  const m1 = mat2d.fromTranslation(M[0], vec2.fromValues(-cameraX, -cameraY));
+  const m2 = mat2d.fromScaling(
+    M[1],
+    vec2.fromValues(2 ** zoom, 2 ** zoom * aspectRatio)
+  );
+  return mat2d.mul(M[2], m2, m1);
 }
 
 let isMoving = false;
@@ -135,17 +141,17 @@ canvas.addEventListener(
   (e) => {
     e.preventDefault();
     const newZoom = Math.max(0, Math.min(14, zoom - 0.005 * e.deltaY));
-    const p = new THREE.Vector3(
+    const p = vec2.fromValues(
       -1 + 2 * (e.clientX / WIDTH),
       1 - 2 * (e.clientY / HEIGHT)
     );
-    const m1 = makeMatrix(cameraX, cameraY, zoom).invert();
-    const m2 = makeMatrix(cameraX, cameraY, newZoom).invert();
-    const p1 = p.clone().applyMatrix3(m1);
-    const p2 = p.clone().applyMatrix3(m2);
-    const translation = p1.sub(p2);
-    cameraX += translation.x;
-    cameraY += translation.y;
+    const m1 = mat2d.invert(M[3], makeMatrix(cameraX, cameraY, zoom));
+    const m2 = mat2d.invert(M[4], makeMatrix(cameraX, cameraY, newZoom));
+    const p1 = vec2.transformMat2d(V[0], p, m1);
+    const p2 = vec2.transformMat2d(V[1], p, m2);
+    const translation = vec2.sub(V[2], p1, p2);
+    cameraX += translation[0];
+    cameraY += translation[1];
     wrapCamera();
     zoom = newZoom;
   },
@@ -216,7 +222,7 @@ function compileTile(x: number, y: number, z: number): Array<Feature> {
                 gl.uniformMatrix3fv(
                   gl.getUniformLocation(program, "M"),
                   false,
-                  m.elements
+                  [m[0], m[1], 0, m[2], m[3], 0, m[4], m[5], 1]
                 );
                 gl.uniform3fv(colorLoc, color);
                 gl.drawElements(
