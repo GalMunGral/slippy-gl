@@ -263,7 +263,6 @@ requestAnimationFrame(function render() {
       const tile = loadTile(X, Y, Z);
       const originX = Math.floor(x / 2 ** Z);
       const originY = Math.floor(y / 2 ** Z);
-      console.log(zoom, cameraX, cameraY);
       tile.forEach((f) => f.drawCall(originX, originY));
     }
   }
