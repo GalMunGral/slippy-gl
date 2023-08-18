@@ -1,35 +1,9 @@
-import earcut from "earcut";
-
-class MercatorCoordinate {
-  static mercatorXfromLng(lng) {
-    return (180 + lng) / 360;
-  }
-
-  static mercatorYfromLat(lat) {
-    return (
-      (180 -
-        (180 / Math.PI) *
-          Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360))) /
-      360
-    );
-  }
-
-  static fromLngLat(lngLat) {
-    const x = -1 + MercatorCoordinate.mercatorXfromLng(lngLat[0]) * 2;
-    const y = 1 - MercatorCoordinate.mercatorYfromLat(lngLat[1]) * 2;
-    return [x, y];
-  }
-}
-
-const USA_BBOX = [
-  [-126.03515625, 23.079731762449878],
-  [-60.1171875, 23.079731762449878],
-  [-60.1171875, 50.233151832472245],
-  [-126.03515625, 50.233151832472245],
-];
+import tilebelt from "@mapbox/tilebelt";
+import { latFromMercatorY, lngFromMercatorX } from "./mercator";
+import type { CompiledTileFeatures } from "./types";
 
 let cameraX = 0;
-let cameraY = 0;
+let cameraY = 0.2;
 let zoom = 0;
 
 import * as THREE from "three";
@@ -38,7 +12,6 @@ const WIDTH = window.innerWidth;
 const HEIGHT = window.innerHeight;
 
 const canvas = document.createElement("canvas");
-canvas.style.border = "1px solid black";
 document.body.append(canvas);
 canvas.width = WIDTH;
 canvas.height = HEIGHT;
@@ -53,6 +26,7 @@ function compileShader(
     | WebGL2RenderingContext["FRAGMENT_SHADER"]
 ): WebGLShader {
   const shader = gl.createShader(shaderType)!;
+  gl.clearColor(0, 0.2, 0.25, 1);
   gl.shaderSource(shader, shaderSource);
   gl.compileShader(shader);
 
@@ -103,10 +77,11 @@ const program = createWebGLProgram(
     `,
   `#version 300 es
   precision mediump float;
+  uniform vec3 color;
   out vec4 fragColor;
 
   void main() {
-    fragColor = vec4(1, 0, 0.5, 0.5);
+    fragColor = vec4(color * 0.3 + 0.2, 1);
   }
     `
 );
@@ -131,35 +106,48 @@ canvas.addEventListener("mousedown", (e) => {
   prevY = e.clientY;
 });
 canvas.addEventListener("mouseup", () => {
-  console.log("end");
+  // console.log("end");
+  isMoving = false;
+});
+canvas.addEventListener("mouseleave", () => {
+  // console.log("end");
   isMoving = false;
 });
 canvas.addEventListener("mousemove", (e) => {
   if (isMoving) {
     cameraX -= (e.clientX - prevX) / (WIDTH / 2) / 2 ** zoom;
     cameraY -= (prevY - e.clientY) / (HEIGHT / 2) / 2 ** zoom;
+    wrapCamera();
     prevX = e.clientX;
     prevY = e.clientY;
   }
 });
 
+function wrapCamera() {
+  if (cameraX < -1) cameraX += 2;
+  if (cameraX >= 1) cameraX -= 2;
+  if (cameraY < -1) cameraY += 2;
+  if (cameraY >= 1) cameraY -= 2;
+}
+
 canvas.addEventListener(
   "wheel",
   (e) => {
     e.preventDefault();
-    const zoomDelta = e.deltaY < 0 ? 0.1 : -0.1;
+    const newZoom = Math.max(0, Math.min(14, zoom - 0.005 * e.deltaY));
     const p = new THREE.Vector3(
       -1 + 2 * (e.clientX / WIDTH),
       1 - 2 * (e.clientY / HEIGHT)
     );
     const m1 = makeMatrix(cameraX, cameraY, zoom).invert();
-    const m2 = makeMatrix(cameraX, cameraY, zoom + zoomDelta).invert();
+    const m2 = makeMatrix(cameraX, cameraY, newZoom).invert();
     const p1 = p.clone().applyMatrix3(m1);
     const p2 = p.clone().applyMatrix3(m2);
     const translation = p1.sub(p2);
     cameraX += translation.x;
     cameraY += translation.y;
-    zoom += zoomDelta;
+    wrapCamera();
+    zoom = newZoom;
   },
   { passive: false }
 );
@@ -167,70 +155,166 @@ canvas.addEventListener(
 gl.viewport(0, 0, WIDTH, HEIGHT);
 
 gl.useProgram(program);
-const vao = gl.createVertexArray();
-gl.bindVertexArray(vao);
-const positionBuf = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, positionBuf);
+
 const positionLoc = gl.getAttribLocation(program, "position");
 gl.enableVertexAttribArray(positionLoc);
-gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
 
-const triangleBuf = gl.createBuffer();
+type Feature = {
+  featureId: number;
+  drawCall(shiftX: number, shiftY: number): void;
+};
 
-const url =
-  "https://raw.githubusercontent.com/scdoshi/us-geojson/master/geojson/nation/US.geojson";
+const colorLoc = gl.getUniformLocation(program, "color");
 
-const triangles: Array<number> = [];
-const vertices: Array<number> = [];
+const tileCache: Record<string, Array<Feature>> = {};
 
-function load(rings) {
-  const data = earcut.flatten(
-    rings.map((ring) => ring.map(MercatorCoordinate.fromLngLat))
-  );
-  const base = vertices.length / 2;
-  vertices.push(...data.vertices);
-  const tri = earcut(data.vertices, data.holes, data.dimensions);
-  triangles.push(...tri.map((i) => i + base));
-}
+function compileTile(x: number, y: number, z: number): Array<Feature> {
+  const key = `${x}-${y}-${z}`;
+  if (!tileCache[key]) {
+    tileCache[key] = [];
+    const worker = new Worker("worker.js");
+    worker.postMessage({ x, y, z });
+    worker.addEventListener(
+      "message",
+      (e: MessageEvent<CompiledTileFeatures>) => {
+        requestIdleCallback(() => {
+          for (const {
+            tileId,
+            featureId,
+            color,
+            vertices,
+            triangles,
+          } of e.data) {
+            const verticesBuf = gl.createBuffer();
+            const trianglesBuf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuf);
+            gl.bufferData(
+              gl.ARRAY_BUFFER,
+              new Float32Array(vertices),
+              gl.STATIC_DRAW
+            );
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, trianglesBuf);
+            gl.bufferData(
+              gl.ELEMENT_ARRAY_BUFFER,
+              new Uint32Array(triangles),
+              gl.STATIC_DRAW
+            );
 
-(async function () {
-  const res = await fetch(url);
-  const geojson = await res.json();
-
-  switch (geojson.geometry.type) {
-    case "Polygon":
-      load(geojson.geometry.coordinates);
-      break;
-    case "MultiPolygon":
-      geojson.geometry.coordinates.forEach((c) => load(c));
-      break;
+            tileCache[tileId].push({
+              featureId,
+              drawCall(shiftX: number, shiftY: number) {
+                // console.log(shiftX, shiftY);
+                gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuf);
+                gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, trianglesBuf);
+                // TODO::::
+                const m = makeMatrix(
+                  cameraX + shiftX * 2,
+                  cameraY - shiftY * 2,
+                  zoom
+                );
+                gl.uniformMatrix3fv(
+                  gl.getUniformLocation(program, "M"),
+                  false,
+                  m.elements
+                );
+                gl.uniform3fv(colorLoc, color);
+                gl.drawElements(
+                  gl.TRIANGLES,
+                  triangles.length,
+                  gl.UNSIGNED_INT,
+                  0
+                );
+              },
+            });
+          }
+          tileCache[e.data[0].tileId].sort((a, b) =>
+            a.featureId < b.featureId ? -1 : 1
+          );
+          worker.terminate();
+        });
+      }
+    );
   }
-})();
+  if (!tileCache[key].length && z > 0) {
+    return compileTile(x >> 1, y >> 1, z - 1);
+  }
+  return tileCache[key];
+}
 
 requestAnimationFrame(function render() {
   gl.useProgram(program);
-  gl.bindVertexArray(vao);
+  gl.clear(gl.COLOR_BUFFER_BIT);
 
-  const m = makeMatrix(cameraX, cameraY, zoom);
-  gl.uniformMatrix3fv(
-    gl.getUniformLocation(program, "M"),
-    false,
-    // prettier-ignore
-    m.elements
+  const scale = WIDTH * 2 ** zoom;
+  const minMercatorX = mod(
+    (((1 + cameraX) / 2) * scale - WIDTH / 2) / scale,
+    1
+  );
+  const minLng = lngFromMercatorX(minMercatorX);
+  const maxMercatorX = mod(
+    (((1 + cameraX) / 2) * scale + WIDTH / 2) / scale,
+    1
+  );
+  const maxLng = lngFromMercatorX(maxMercatorX);
+  const minMercatorY = mod(
+    (((1 - cameraY) / 2) * scale - HEIGHT / 2) / scale,
+    1
+  );
+  const maxLat = latFromMercatorY(minMercatorY);
+  const maxMercatorY = mod(
+    (((1 - cameraY) / 2) * scale + HEIGHT / 2) / scale,
+    1
+  );
+  const minLat = latFromMercatorY(maxMercatorY);
+
+  // console.log("camera", cameraX, cameraY, zoom);
+
+  // console.log("lonlat", minLng, maxLng, minLat, maxLat);
+
+  const z = Math.ceil(zoom);
+
+  const [centerX, centerY] = tilebelt.pointToTile(
+    lngFromMercatorX((1 + cameraX) / 2),
+    latFromMercatorY((1 - cameraY) / 2),
+    z
   );
 
-  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuf);
-  gl.bufferData(
-    gl.ELEMENT_ARRAY_BUFFER,
-    new Uint32Array(triangles),
-    gl.STATIC_DRAW
-  );
+  let [minX, minY] = tilebelt.pointToTile(minLng, maxLat, z);
+  let [maxX, maxY] = tilebelt.pointToTile(maxLng, minLat, z);
 
-  console.log("la", vertices.length, Math.max(...triangles));
+  if (minX > centerX) minX -= 2 ** z;
+  if (maxX < centerX) maxX += 2 ** z;
+  if (minY > centerY) minY -= 2 ** z;
+  if (maxY < centerY) maxY += 2 ** z;
 
-  gl.drawElements(gl.TRIANGLES, triangles.length, gl.UNSIGNED_INT, 0);
+  // console.log("camera", cameraX, cameraY);
+  // console.log("xy", minX, maxX, minY, maxY);
+  // console.log(
+  //   "xy",
+  //   mod(minX, 2 ** z),
+  //   mod(maxX, 2 ** z),
+  //   mod(minY, 2 ** z),
+  //   mod(maxY, 2 ** z)
+  // );
+
+  for (let x = minX - 1; x <= maxX + 1; x++) {
+    for (let y = minY - 1; y <= maxY + 1; y++) {
+      const normalizedX = mod(x, 2 ** z);
+      const normalizedY = mod(y, 2 ** z);
+      const tile = compileTile(normalizedX, normalizedY, z);
+      const deltaX = x - normalizedX;
+      const shiftX = deltaX ? -deltaX / Math.abs(deltaX) : 0;
+      const deltaY = y - normalizedY;
+      const shiftY = deltaY ? -deltaY / Math.abs(deltaY) : 0;
+      // console.log("delta", deltaX, deltaY);
+      tile.forEach((f) => f.drawCall(shiftX, shiftY));
+    }
+  }
 
   requestAnimationFrame(render);
 });
+
+function mod(a: number, b: number) {
+  return ((a % b) + b) % b;
+}

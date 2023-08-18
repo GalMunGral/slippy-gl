@@ -5,8 +5,8 @@
   var __getOwnPropNames = Object.getOwnPropertyNames;
   var __getProtoOf = Object.getPrototypeOf;
   var __hasOwnProp = Object.prototype.hasOwnProperty;
-  var __commonJS = (cb, mod) => function __require() {
-    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  var __commonJS = (cb, mod2) => function __require() {
+    return mod2 || (0, cb[__getOwnPropNames(cb)[0]])((mod2 = { exports: {} }).exports, mod2), mod2.exports;
   };
   var __copyProps = (to, from, except, desc) => {
     if (from && typeof from === "object" || typeof from === "function") {
@@ -16,483 +16,175 @@
     }
     return to;
   };
-  var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__getProtoOf(mod2)) : {}, __copyProps(
     // If the importer is in node compatibility mode or this is not an ESM
     // file that has been converted to a CommonJS file using a Babel-
     // compatible transform (i.e. "__esModule" has not been set), then set
     // "default" to the CommonJS "module.exports" for node compatibility.
-    isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-    mod
+    isNodeMode || !mod2 || !mod2.__esModule ? __defProp(target, "default", { value: mod2, enumerable: true }) : target,
+    mod2
   ));
 
-  // node_modules/earcut/src/earcut.js
-  var require_earcut = __commonJS({
-    "node_modules/earcut/src/earcut.js"(exports, module) {
+  // node_modules/@mapbox/tilebelt/index.js
+  var require_tilebelt = __commonJS({
+    "node_modules/@mapbox/tilebelt/index.js"(exports, module) {
       "use strict";
-      module.exports = earcut2;
-      module.exports.default = earcut2;
-      function earcut2(data, holeIndices, dim) {
-        dim = dim || 2;
-        var hasHoles = holeIndices && holeIndices.length, outerLen = hasHoles ? holeIndices[0] * dim : data.length, outerNode = linkedList(data, 0, outerLen, dim, true), triangles2 = [];
-        if (!outerNode || outerNode.next === outerNode.prev)
-          return triangles2;
-        var minX, minY, maxX, maxY, x, y, invSize;
-        if (hasHoles)
-          outerNode = eliminateHoles(data, holeIndices, outerNode, dim);
-        if (data.length > 80 * dim) {
-          minX = maxX = data[0];
-          minY = maxY = data[1];
-          for (var i = dim; i < outerLen; i += dim) {
-            x = data[i];
-            y = data[i + 1];
-            if (x < minX)
-              minX = x;
-            if (y < minY)
-              minY = y;
-            if (x > maxX)
-              maxX = x;
-            if (y > maxY)
-              maxY = y;
-          }
-          invSize = Math.max(maxX - minX, maxY - minY);
-          invSize = invSize !== 0 ? 32767 / invSize : 0;
-        }
-        earcutLinked(outerNode, triangles2, dim, minX, minY, invSize, 0);
-        return triangles2;
+      var d2r = Math.PI / 180;
+      var r2d = 180 / Math.PI;
+      function tileToBBOX(tile) {
+        var e = tile2lon(tile[0] + 1, tile[2]);
+        var w = tile2lon(tile[0], tile[2]);
+        var s = tile2lat(tile[1] + 1, tile[2]);
+        var n = tile2lat(tile[1], tile[2]);
+        return [w, s, e, n];
       }
-      function linkedList(data, start, end, dim, clockwise) {
-        var i, last;
-        if (clockwise === signedArea(data, start, end, dim) > 0) {
-          for (i = start; i < end; i += dim)
-            last = insertNode(i, data[i], data[i + 1], last);
-        } else {
-          for (i = end - dim; i >= start; i -= dim)
-            last = insertNode(i, data[i], data[i + 1], last);
-        }
-        if (last && equals(last, last.next)) {
-          removeNode(last);
-          last = last.next;
-        }
-        return last;
+      function tileToGeoJSON(tile) {
+        var bbox = tileToBBOX(tile);
+        var poly = {
+          type: "Polygon",
+          coordinates: [[
+            [bbox[0], bbox[3]],
+            [bbox[0], bbox[1]],
+            [bbox[2], bbox[1]],
+            [bbox[2], bbox[3]],
+            [bbox[0], bbox[3]]
+          ]]
+        };
+        return poly;
       }
-      function filterPoints(start, end) {
-        if (!start)
-          return start;
-        if (!end)
-          end = start;
-        var p = start, again;
-        do {
-          again = false;
-          if (!p.steiner && (equals(p, p.next) || area(p.prev, p, p.next) === 0)) {
-            removeNode(p);
-            p = end = p.prev;
-            if (p === p.next)
-              break;
-            again = true;
-          } else {
-            p = p.next;
-          }
-        } while (again || p !== end);
-        return end;
+      function tile2lon(x, z) {
+        return x / Math.pow(2, z) * 360 - 180;
       }
-      function earcutLinked(ear, triangles2, dim, minX, minY, invSize, pass) {
-        if (!ear)
-          return;
-        if (!pass && invSize)
-          indexCurve(ear, minX, minY, invSize);
-        var stop = ear, prev, next;
-        while (ear.prev !== ear.next) {
-          prev = ear.prev;
-          next = ear.next;
-          if (invSize ? isEarHashed(ear, minX, minY, invSize) : isEar(ear)) {
-            triangles2.push(prev.i / dim | 0);
-            triangles2.push(ear.i / dim | 0);
-            triangles2.push(next.i / dim | 0);
-            removeNode(ear);
-            ear = next.next;
-            stop = next.next;
-            continue;
-          }
-          ear = next;
-          if (ear === stop) {
-            if (!pass) {
-              earcutLinked(filterPoints(ear), triangles2, dim, minX, minY, invSize, 1);
-            } else if (pass === 1) {
-              ear = cureLocalIntersections(filterPoints(ear), triangles2, dim);
-              earcutLinked(ear, triangles2, dim, minX, minY, invSize, 2);
-            } else if (pass === 2) {
-              splitEarcut(ear, triangles2, dim, minX, minY, invSize);
-            }
-            break;
-          }
-        }
+      function tile2lat(y, z) {
+        var n = Math.PI - 2 * Math.PI * y / Math.pow(2, z);
+        return r2d * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
       }
-      function isEar(ear) {
-        var a = ear.prev, b = ear, c = ear.next;
-        if (area(a, b, c) >= 0)
-          return false;
-        var ax = a.x, bx = b.x, cx = c.x, ay = a.y, by = b.y, cy = c.y;
-        var x0 = ax < bx ? ax < cx ? ax : cx : bx < cx ? bx : cx, y0 = ay < by ? ay < cy ? ay : cy : by < cy ? by : cy, x1 = ax > bx ? ax > cx ? ax : cx : bx > cx ? bx : cx, y1 = ay > by ? ay > cy ? ay : cy : by > cy ? by : cy;
-        var p = c.next;
-        while (p !== a) {
-          if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && pointInTriangle(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0)
+      function pointToTile(lon, lat, z) {
+        var tile = pointToTileFraction(lon, lat, z);
+        tile[0] = Math.floor(tile[0]);
+        tile[1] = Math.floor(tile[1]);
+        return tile;
+      }
+      function getChildren(tile) {
+        return [
+          [tile[0] * 2, tile[1] * 2, tile[2] + 1],
+          [tile[0] * 2 + 1, tile[1] * 2, tile[2] + 1],
+          [tile[0] * 2 + 1, tile[1] * 2 + 1, tile[2] + 1],
+          [tile[0] * 2, tile[1] * 2 + 1, tile[2] + 1]
+        ];
+      }
+      function getParent(tile) {
+        return [tile[0] >> 1, tile[1] >> 1, tile[2] - 1];
+      }
+      function getSiblings(tile) {
+        return getChildren(getParent(tile));
+      }
+      function hasSiblings(tile, tiles) {
+        var siblings = getSiblings(tile);
+        for (var i = 0; i < siblings.length; i++) {
+          if (!hasTile(tiles, siblings[i]))
             return false;
-          p = p.next;
         }
         return true;
       }
-      function isEarHashed(ear, minX, minY, invSize) {
-        var a = ear.prev, b = ear, c = ear.next;
-        if (area(a, b, c) >= 0)
-          return false;
-        var ax = a.x, bx = b.x, cx = c.x, ay = a.y, by = b.y, cy = c.y;
-        var x0 = ax < bx ? ax < cx ? ax : cx : bx < cx ? bx : cx, y0 = ay < by ? ay < cy ? ay : cy : by < cy ? by : cy, x1 = ax > bx ? ax > cx ? ax : cx : bx > cx ? bx : cx, y1 = ay > by ? ay > cy ? ay : cy : by > cy ? by : cy;
-        var minZ = zOrder(x0, y0, minX, minY, invSize), maxZ = zOrder(x1, y1, minX, minY, invSize);
-        var p = ear.prevZ, n = ear.nextZ;
-        while (p && p.z >= minZ && n && n.z <= maxZ) {
-          if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && p !== a && p !== c && pointInTriangle(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0)
-            return false;
-          p = p.prevZ;
-          if (n.x >= x0 && n.x <= x1 && n.y >= y0 && n.y <= y1 && n !== a && n !== c && pointInTriangle(ax, ay, bx, by, cx, cy, n.x, n.y) && area(n.prev, n, n.next) >= 0)
-            return false;
-          n = n.nextZ;
-        }
-        while (p && p.z >= minZ) {
-          if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && p !== a && p !== c && pointInTriangle(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0)
-            return false;
-          p = p.prevZ;
-        }
-        while (n && n.z <= maxZ) {
-          if (n.x >= x0 && n.x <= x1 && n.y >= y0 && n.y <= y1 && n !== a && n !== c && pointInTriangle(ax, ay, bx, by, cx, cy, n.x, n.y) && area(n.prev, n, n.next) >= 0)
-            return false;
-          n = n.nextZ;
-        }
-        return true;
-      }
-      function cureLocalIntersections(start, triangles2, dim) {
-        var p = start;
-        do {
-          var a = p.prev, b = p.next.next;
-          if (!equals(a, b) && intersects(a, p, p.next, b) && locallyInside(a, b) && locallyInside(b, a)) {
-            triangles2.push(a.i / dim | 0);
-            triangles2.push(p.i / dim | 0);
-            triangles2.push(b.i / dim | 0);
-            removeNode(p);
-            removeNode(p.next);
-            p = start = b;
-          }
-          p = p.next;
-        } while (p !== start);
-        return filterPoints(p);
-      }
-      function splitEarcut(start, triangles2, dim, minX, minY, invSize) {
-        var a = start;
-        do {
-          var b = a.next.next;
-          while (b !== a.prev) {
-            if (a.i !== b.i && isValidDiagonal(a, b)) {
-              var c = splitPolygon(a, b);
-              a = filterPoints(a, a.next);
-              c = filterPoints(c, c.next);
-              earcutLinked(a, triangles2, dim, minX, minY, invSize, 0);
-              earcutLinked(c, triangles2, dim, minX, minY, invSize, 0);
-              return;
-            }
-            b = b.next;
-          }
-          a = a.next;
-        } while (a !== start);
-      }
-      function eliminateHoles(data, holeIndices, outerNode, dim) {
-        var queue = [], i, len, start, end, list;
-        for (i = 0, len = holeIndices.length; i < len; i++) {
-          start = holeIndices[i] * dim;
-          end = i < len - 1 ? holeIndices[i + 1] * dim : data.length;
-          list = linkedList(data, start, end, dim, false);
-          if (list === list.next)
-            list.steiner = true;
-          queue.push(getLeftmost(list));
-        }
-        queue.sort(compareX);
-        for (i = 0; i < queue.length; i++) {
-          outerNode = eliminateHole(queue[i], outerNode);
-        }
-        return outerNode;
-      }
-      function compareX(a, b) {
-        return a.x - b.x;
-      }
-      function eliminateHole(hole, outerNode) {
-        var bridge = findHoleBridge(hole, outerNode);
-        if (!bridge) {
-          return outerNode;
-        }
-        var bridgeReverse = splitPolygon(bridge, hole);
-        filterPoints(bridgeReverse, bridgeReverse.next);
-        return filterPoints(bridge, bridge.next);
-      }
-      function findHoleBridge(hole, outerNode) {
-        var p = outerNode, hx = hole.x, hy = hole.y, qx = -Infinity, m;
-        do {
-          if (hy <= p.y && hy >= p.next.y && p.next.y !== p.y) {
-            var x = p.x + (hy - p.y) * (p.next.x - p.x) / (p.next.y - p.y);
-            if (x <= hx && x > qx) {
-              qx = x;
-              m = p.x < p.next.x ? p : p.next;
-              if (x === hx)
-                return m;
-            }
-          }
-          p = p.next;
-        } while (p !== outerNode);
-        if (!m)
-          return null;
-        var stop = m, mx = m.x, my = m.y, tanMin = Infinity, tan;
-        p = m;
-        do {
-          if (hx >= p.x && p.x >= mx && hx !== p.x && pointInTriangle(hy < my ? hx : qx, hy, mx, my, hy < my ? qx : hx, hy, p.x, p.y)) {
-            tan = Math.abs(hy - p.y) / (hx - p.x);
-            if (locallyInside(p, hole) && (tan < tanMin || tan === tanMin && (p.x > m.x || p.x === m.x && sectorContainsSector(m, p)))) {
-              m = p;
-              tanMin = tan;
-            }
-          }
-          p = p.next;
-        } while (p !== stop);
-        return m;
-      }
-      function sectorContainsSector(m, p) {
-        return area(m.prev, m, p.prev) < 0 && area(p.next, m, m.next) < 0;
-      }
-      function indexCurve(start, minX, minY, invSize) {
-        var p = start;
-        do {
-          if (p.z === 0)
-            p.z = zOrder(p.x, p.y, minX, minY, invSize);
-          p.prevZ = p.prev;
-          p.nextZ = p.next;
-          p = p.next;
-        } while (p !== start);
-        p.prevZ.nextZ = null;
-        p.prevZ = null;
-        sortLinked(p);
-      }
-      function sortLinked(list) {
-        var i, p, q, e, tail, numMerges, pSize, qSize, inSize = 1;
-        do {
-          p = list;
-          list = null;
-          tail = null;
-          numMerges = 0;
-          while (p) {
-            numMerges++;
-            q = p;
-            pSize = 0;
-            for (i = 0; i < inSize; i++) {
-              pSize++;
-              q = q.nextZ;
-              if (!q)
-                break;
-            }
-            qSize = inSize;
-            while (pSize > 0 || qSize > 0 && q) {
-              if (pSize !== 0 && (qSize === 0 || !q || p.z <= q.z)) {
-                e = p;
-                p = p.nextZ;
-                pSize--;
-              } else {
-                e = q;
-                q = q.nextZ;
-                qSize--;
-              }
-              if (tail)
-                tail.nextZ = e;
-              else
-                list = e;
-              e.prevZ = tail;
-              tail = e;
-            }
-            p = q;
-          }
-          tail.nextZ = null;
-          inSize *= 2;
-        } while (numMerges > 1);
-        return list;
-      }
-      function zOrder(x, y, minX, minY, invSize) {
-        x = (x - minX) * invSize | 0;
-        y = (y - minY) * invSize | 0;
-        x = (x | x << 8) & 16711935;
-        x = (x | x << 4) & 252645135;
-        x = (x | x << 2) & 858993459;
-        x = (x | x << 1) & 1431655765;
-        y = (y | y << 8) & 16711935;
-        y = (y | y << 4) & 252645135;
-        y = (y | y << 2) & 858993459;
-        y = (y | y << 1) & 1431655765;
-        return x | y << 1;
-      }
-      function getLeftmost(start) {
-        var p = start, leftmost = start;
-        do {
-          if (p.x < leftmost.x || p.x === leftmost.x && p.y < leftmost.y)
-            leftmost = p;
-          p = p.next;
-        } while (p !== start);
-        return leftmost;
-      }
-      function pointInTriangle(ax, ay, bx, by, cx, cy, px, py) {
-        return (cx - px) * (ay - py) >= (ax - px) * (cy - py) && (ax - px) * (by - py) >= (bx - px) * (ay - py) && (bx - px) * (cy - py) >= (cx - px) * (by - py);
-      }
-      function isValidDiagonal(a, b) {
-        return a.next.i !== b.i && a.prev.i !== b.i && !intersectsPolygon(a, b) && // dones't intersect other edges
-        (locallyInside(a, b) && locallyInside(b, a) && middleInside(a, b) && // locally visible
-        (area(a.prev, a, b.prev) || area(a, b.prev, b)) || // does not create opposite-facing sectors
-        equals(a, b) && area(a.prev, a, a.next) > 0 && area(b.prev, b, b.next) > 0);
-      }
-      function area(p, q, r) {
-        return (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
-      }
-      function equals(p1, p2) {
-        return p1.x === p2.x && p1.y === p2.y;
-      }
-      function intersects(p1, q1, p2, q2) {
-        var o1 = sign(area(p1, q1, p2));
-        var o2 = sign(area(p1, q1, q2));
-        var o3 = sign(area(p2, q2, p1));
-        var o4 = sign(area(p2, q2, q1));
-        if (o1 !== o2 && o3 !== o4)
-          return true;
-        if (o1 === 0 && onSegment(p1, p2, q1))
-          return true;
-        if (o2 === 0 && onSegment(p1, q2, q1))
-          return true;
-        if (o3 === 0 && onSegment(p2, p1, q2))
-          return true;
-        if (o4 === 0 && onSegment(p2, q1, q2))
-          return true;
-        return false;
-      }
-      function onSegment(p, q, r) {
-        return q.x <= Math.max(p.x, r.x) && q.x >= Math.min(p.x, r.x) && q.y <= Math.max(p.y, r.y) && q.y >= Math.min(p.y, r.y);
-      }
-      function sign(num) {
-        return num > 0 ? 1 : num < 0 ? -1 : 0;
-      }
-      function intersectsPolygon(a, b) {
-        var p = a;
-        do {
-          if (p.i !== a.i && p.next.i !== a.i && p.i !== b.i && p.next.i !== b.i && intersects(p, p.next, a, b))
+      function hasTile(tiles, tile) {
+        for (var i = 0; i < tiles.length; i++) {
+          if (tilesEqual(tiles[i], tile))
             return true;
-          p = p.next;
-        } while (p !== a);
+        }
         return false;
       }
-      function locallyInside(a, b) {
-        return area(a.prev, a, a.next) < 0 ? area(a, b, a.next) >= 0 && area(a, a.prev, b) >= 0 : area(a, b, a.prev) < 0 || area(a, a.next, b) < 0;
+      function tilesEqual(tile1, tile2) {
+        return tile1[0] === tile2[0] && tile1[1] === tile2[1] && tile1[2] === tile2[2];
       }
-      function middleInside(a, b) {
-        var p = a, inside = false, px = (a.x + b.x) / 2, py = (a.y + b.y) / 2;
-        do {
-          if (p.y > py !== p.next.y > py && p.next.y !== p.y && px < (p.next.x - p.x) * (py - p.y) / (p.next.y - p.y) + p.x)
-            inside = !inside;
-          p = p.next;
-        } while (p !== a);
-        return inside;
-      }
-      function splitPolygon(a, b) {
-        var a2 = new Node(a.i, a.x, a.y), b2 = new Node(b.i, b.x, b.y), an = a.next, bp = b.prev;
-        a.next = b;
-        b.prev = a;
-        a2.next = an;
-        an.prev = a2;
-        b2.next = a2;
-        a2.prev = b2;
-        bp.next = b2;
-        b2.prev = bp;
-        return b2;
-      }
-      function insertNode(i, x, y, last) {
-        var p = new Node(i, x, y);
-        if (!last) {
-          p.prev = p;
-          p.next = p;
-        } else {
-          p.next = last.next;
-          p.prev = last;
-          last.next.prev = p;
-          last.next = p;
+      function tileToQuadkey(tile) {
+        var index = "";
+        for (var z = tile[2]; z > 0; z--) {
+          var b = 0;
+          var mask = 1 << z - 1;
+          if ((tile[0] & mask) !== 0)
+            b++;
+          if ((tile[1] & mask) !== 0)
+            b += 2;
+          index += b.toString();
         }
-        return p;
+        return index;
       }
-      function removeNode(p) {
-        p.next.prev = p.prev;
-        p.prev.next = p.next;
-        if (p.prevZ)
-          p.prevZ.nextZ = p.nextZ;
-        if (p.nextZ)
-          p.nextZ.prevZ = p.prevZ;
-      }
-      function Node(i, x, y) {
-        this.i = i;
-        this.x = x;
-        this.y = y;
-        this.prev = null;
-        this.next = null;
-        this.z = 0;
-        this.prevZ = null;
-        this.nextZ = null;
-        this.steiner = false;
-      }
-      earcut2.deviation = function(data, holeIndices, dim, triangles2) {
-        var hasHoles = holeIndices && holeIndices.length;
-        var outerLen = hasHoles ? holeIndices[0] * dim : data.length;
-        var polygonArea = Math.abs(signedArea(data, 0, outerLen, dim));
-        if (hasHoles) {
-          for (var i = 0, len = holeIndices.length; i < len; i++) {
-            var start = holeIndices[i] * dim;
-            var end = i < len - 1 ? holeIndices[i + 1] * dim : data.length;
-            polygonArea -= Math.abs(signedArea(data, start, end, dim));
+      function quadkeyToTile(quadkey) {
+        var x = 0;
+        var y = 0;
+        var z = quadkey.length;
+        for (var i = z; i > 0; i--) {
+          var mask = 1 << i - 1;
+          var q = +quadkey[z - i];
+          if (q === 1)
+            x |= mask;
+          if (q === 2)
+            y |= mask;
+          if (q === 3) {
+            x |= mask;
+            y |= mask;
           }
         }
-        var trianglesArea = 0;
-        for (i = 0; i < triangles2.length; i += 3) {
-          var a = triangles2[i] * dim;
-          var b = triangles2[i + 1] * dim;
-          var c = triangles2[i + 2] * dim;
-          trianglesArea += Math.abs(
-            (data[a] - data[c]) * (data[b + 1] - data[a + 1]) - (data[a] - data[b]) * (data[c + 1] - data[a + 1])
-          );
-        }
-        return polygonArea === 0 && trianglesArea === 0 ? 0 : Math.abs((trianglesArea - polygonArea) / polygonArea);
-      };
-      function signedArea(data, start, end, dim) {
-        var sum = 0;
-        for (var i = start, j = end - dim; i < end; i += dim) {
-          sum += (data[j] - data[i]) * (data[i + 1] + data[j + 1]);
-          j = i;
-        }
-        return sum;
+        return [x, y, z];
       }
-      earcut2.flatten = function(data) {
-        var dim = data[0][0].length, result = { vertices: [], holes: [], dimensions: dim }, holeIndex = 0;
-        for (var i = 0; i < data.length; i++) {
-          for (var j = 0; j < data[i].length; j++) {
-            for (var d = 0; d < dim; d++)
-              result.vertices.push(data[i][j][d]);
-          }
-          if (i > 0) {
-            holeIndex += data[i - 1].length;
-            result.holes.push(holeIndex);
+      function bboxToTile(bboxCoords) {
+        var min = pointToTile(bboxCoords[0], bboxCoords[1], 32);
+        var max = pointToTile(bboxCoords[2], bboxCoords[3], 32);
+        var bbox = [min[0], min[1], max[0], max[1]];
+        var z = getBboxZoom(bbox);
+        if (z === 0)
+          return [0, 0, 0];
+        var x = bbox[0] >>> 32 - z;
+        var y = bbox[1] >>> 32 - z;
+        return [x, y, z];
+      }
+      function getBboxZoom(bbox) {
+        var MAX_ZOOM = 28;
+        for (var z = 0; z < MAX_ZOOM; z++) {
+          var mask = 1 << 32 - (z + 1);
+          if ((bbox[0] & mask) !== (bbox[2] & mask) || (bbox[1] & mask) !== (bbox[3] & mask)) {
+            return z;
           }
         }
-        return result;
+        return MAX_ZOOM;
+      }
+      function pointToTileFraction(lon, lat, z) {
+        var sin = Math.sin(lat * d2r), z2 = Math.pow(2, z), x = z2 * (lon / 360 + 0.5), y = z2 * (0.5 - 0.25 * Math.log((1 + sin) / (1 - sin)) / Math.PI);
+        x = x % z2;
+        if (x < 0)
+          x = x + z2;
+        return [x, y, z];
+      }
+      module.exports = {
+        tileToGeoJSON,
+        tileToBBOX,
+        getChildren,
+        getParent,
+        getSiblings,
+        hasTile,
+        hasSiblings,
+        tilesEqual,
+        tileToQuadkey,
+        quadkeyToTile,
+        pointToTile,
+        bboxToTile,
+        pointToTileFraction
       };
     }
   });
 
   // src/index.ts
-  var import_earcut = __toESM(require_earcut());
+  var import_tilebelt = __toESM(require_tilebelt());
+
+  // src/mercator.ts
+  function lngFromMercatorX(x) {
+    return x * 360 - 180;
+  }
+  function latFromMercatorY(y) {
+    const y2 = 180 - y * 360;
+    return 360 / Math.PI * Math.atan(Math.exp(y2 * Math.PI / 180)) - 90;
+  }
 
   // node_modules/three/build/three.module.js
   var REVISION = "155";
@@ -1495,20 +1187,20 @@
       };
       const data = this.data;
       if (data !== null) {
-        let url2;
+        let url;
         if (Array.isArray(data)) {
-          url2 = [];
+          url = [];
           for (let i = 0, l = data.length; i < l; i++) {
             if (data[i].isDataTexture) {
-              url2.push(serializeImage(data[i].image));
+              url.push(serializeImage(data[i].image));
             } else {
-              url2.push(serializeImage(data[i]));
+              url.push(serializeImage(data[i]));
             }
           }
         } else {
-          url2 = serializeImage(data);
+          url = serializeImage(data);
         }
-        output.url = url2;
+        output.url = url;
       }
       if (!isRootObject) {
         meta.images[this.uuid] = output;
@@ -7356,7 +7048,7 @@
       heightSegments = Math.floor(heightSegments);
       depthSegments = Math.floor(depthSegments);
       const indices = [];
-      const vertices2 = [];
+      const vertices = [];
       const normals = [];
       const uvs = [];
       let numberOfVertices = 0;
@@ -7368,7 +7060,7 @@
       buildPlane("x", "y", "z", 1, -1, width, height, depth, widthSegments, heightSegments, 4);
       buildPlane("x", "y", "z", -1, -1, width, height, -depth, widthSegments, heightSegments, 5);
       this.setIndex(indices);
-      this.setAttribute("position", new Float32BufferAttribute(vertices2, 3));
+      this.setAttribute("position", new Float32BufferAttribute(vertices, 3));
       this.setAttribute("normal", new Float32BufferAttribute(normals, 3));
       this.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
       function buildPlane(u, v, w, udir, vdir, width2, height2, depth2, gridX, gridY, materialIndex) {
@@ -7389,7 +7081,7 @@
             vector[u] = x * udir;
             vector[v] = y * vdir;
             vector[w] = depthHalf;
-            vertices2.push(vector.x, vector.y, vector.z);
+            vertices.push(vector.x, vector.y, vector.z);
             vector[u] = 0;
             vector[v] = 0;
             vector[w] = depth2 > 0 ? 1 : -1;
@@ -8362,14 +8054,14 @@
       const segment_width = width / gridX;
       const segment_height = height / gridY;
       const indices = [];
-      const vertices2 = [];
+      const vertices = [];
       const normals = [];
       const uvs = [];
       for (let iy = 0; iy < gridY1; iy++) {
         const y = iy * segment_height - height_half;
         for (let ix = 0; ix < gridX1; ix++) {
           const x = ix * segment_width - width_half;
-          vertices2.push(x, -y, 0);
+          vertices.push(x, -y, 0);
           normals.push(0, 0, 1);
           uvs.push(ix / gridX);
           uvs.push(1 - iy / gridY);
@@ -8386,7 +8078,7 @@
         }
       }
       this.setIndex(indices);
-      this.setAttribute("position", new Float32BufferAttribute(vertices2, 3));
+      this.setAttribute("position", new Float32BufferAttribute(vertices, 3));
       this.setAttribute("normal", new Float32BufferAttribute(normals, 3));
       this.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
     }
@@ -9300,15 +8992,15 @@
         return gl2.createVertexArray();
       return extension.createVertexArrayOES();
     }
-    function bindVertexArrayObject(vao2) {
+    function bindVertexArrayObject(vao) {
       if (capabilities.isWebGL2)
-        return gl2.bindVertexArray(vao2);
-      return extension.bindVertexArrayOES(vao2);
+        return gl2.bindVertexArray(vao);
+      return extension.bindVertexArrayOES(vao);
     }
-    function deleteVertexArrayObject(vao2) {
+    function deleteVertexArrayObject(vao) {
       if (capabilities.isWebGL2)
-        return gl2.deleteVertexArray(vao2);
-      return extension.deleteVertexArrayOES(vao2);
+        return gl2.deleteVertexArray(vao);
+      return extension.deleteVertexArrayOES(vao);
     }
     function getBindingState(geometry, program2, material) {
       const wireframe = material.wireframe === true;
@@ -9329,7 +9021,7 @@
       }
       return state;
     }
-    function createBindingState(vao2) {
+    function createBindingState(vao) {
       const newAttributes = [];
       const enabledAttributes = [];
       const attributeDivisors = [];
@@ -9346,7 +9038,7 @@
         newAttributes,
         enabledAttributes,
         attributeDivisors,
-        object: vao2,
+        object: vao,
         attributes: {},
         index: null
       };
@@ -10294,13 +9986,13 @@
       const max = 1 + texelSize;
       const uv1 = [min, min, max, min, max, max, min, min, max, max, min, max];
       const cubeFaces = 6;
-      const vertices2 = 6;
+      const vertices = 6;
       const positionSize = 3;
       const uvSize = 2;
       const faceIndexSize = 1;
-      const position = new Float32Array(positionSize * vertices2 * cubeFaces);
-      const uv = new Float32Array(uvSize * vertices2 * cubeFaces);
-      const faceIndex = new Float32Array(faceIndexSize * vertices2 * cubeFaces);
+      const position = new Float32Array(positionSize * vertices * cubeFaces);
+      const uv = new Float32Array(uvSize * vertices * cubeFaces);
+      const faceIndex = new Float32Array(faceIndexSize * vertices * cubeFaces);
       for (let face = 0; face < cubeFaces; face++) {
         const x = face % 3 * 2 / 3 - 1;
         const y = face > 2 ? 0 : -1;
@@ -10324,10 +10016,10 @@
           y + 1,
           0
         ];
-        position.set(coordinates, positionSize * vertices2 * face);
-        uv.set(uv1, uvSize * vertices2 * face);
+        position.set(coordinates, positionSize * vertices * face);
+        uv.set(uv1, uvSize * vertices * face);
         const fill = [face, face, face, face, face, face];
-        faceIndex.set(fill, faceIndexSize * vertices2 * face);
+        faceIndex.set(fill, faceIndexSize * vertices * face);
       }
       const planes = new BufferGeometry();
       planes.setAttribute("position", new BufferAttribute(position, positionSize));
@@ -18714,19 +18406,19 @@
       this.onLoad = onLoad;
       this.onProgress = onProgress;
       this.onError = onError;
-      this.itemStart = function(url2) {
+      this.itemStart = function(url) {
         itemsTotal++;
         if (isLoading === false) {
           if (scope.onStart !== void 0) {
-            scope.onStart(url2, itemsLoaded, itemsTotal);
+            scope.onStart(url, itemsLoaded, itemsTotal);
           }
         }
         isLoading = true;
       };
-      this.itemEnd = function(url2) {
+      this.itemEnd = function(url) {
         itemsLoaded++;
         if (scope.onProgress !== void 0) {
-          scope.onProgress(url2, itemsLoaded, itemsTotal);
+          scope.onProgress(url, itemsLoaded, itemsTotal);
         }
         if (itemsLoaded === itemsTotal) {
           isLoading = false;
@@ -18735,16 +18427,16 @@
           }
         }
       };
-      this.itemError = function(url2) {
+      this.itemError = function(url) {
         if (scope.onError !== void 0) {
-          scope.onError(url2);
+          scope.onError(url);
         }
       };
-      this.resolveURL = function(url2) {
+      this.resolveURL = function(url) {
         if (urlModifier) {
-          return urlModifier(url2);
+          return urlModifier(url);
         }
-        return url2;
+        return url;
       };
       this.setURLModifier = function(transform) {
         urlModifier = transform;
@@ -18787,10 +18479,10 @@
     }
     load() {
     }
-    loadAsync(url2, onProgress) {
+    loadAsync(url, onProgress) {
       const scope = this;
       return new Promise(function(resolve, reject) {
-        scope.load(url2, resolve, onProgress, reject);
+        scope.load(url, resolve, onProgress, reject);
       });
     }
     parse() {
@@ -19211,26 +18903,12 @@
   }
 
   // src/index.ts
-  var MercatorCoordinate = class _MercatorCoordinate {
-    static mercatorXfromLng(lng) {
-      return (180 + lng) / 360;
-    }
-    static mercatorYfromLat(lat) {
-      return (180 - 180 / Math.PI * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))) / 360;
-    }
-    static fromLngLat(lngLat) {
-      const x = -1 + _MercatorCoordinate.mercatorXfromLng(lngLat[0]) * 2;
-      const y = 1 - _MercatorCoordinate.mercatorYfromLat(lngLat[1]) * 2;
-      return [x, y];
-    }
-  };
   var cameraX = 0;
-  var cameraY = 0;
+  var cameraY = 0.2;
   var zoom = 0;
   var WIDTH = window.innerWidth;
   var HEIGHT = window.innerHeight;
   var canvas = document.createElement("canvas");
-  canvas.style.border = "1px solid black";
   document.body.append(canvas);
   canvas.width = WIDTH;
   canvas.height = HEIGHT;
@@ -19238,6 +18916,7 @@
   canvas.style.height = canvas.height + "px";
   function compileShader(gl2, shaderSource, shaderType) {
     const shader = gl2.createShader(shaderType);
+    gl2.clearColor(0, 0.2, 0.25, 1);
     gl2.shaderSource(shader, shaderSource);
     gl2.compileShader(shader);
     const success = gl2.getShaderParameter(shader, gl2.COMPILE_STATUS);
@@ -19277,10 +18956,11 @@
     `,
     `#version 300 es
   precision mediump float;
+  uniform vec3 color;
   out vec4 fragColor;
 
   void main() {
-    fragColor = vec4(1, 0, 0.5, 0.5);
+    fragColor = vec4(color * 0.3 + 0.2, 1);
   }
     `
   );
@@ -19299,93 +18979,184 @@
     prevY = e.clientY;
   });
   canvas.addEventListener("mouseup", () => {
-    console.log("end");
+    isMoving = false;
+  });
+  canvas.addEventListener("mouseleave", () => {
     isMoving = false;
   });
   canvas.addEventListener("mousemove", (e) => {
     if (isMoving) {
       cameraX -= (e.clientX - prevX) / (WIDTH / 2) / 2 ** zoom;
       cameraY -= (prevY - e.clientY) / (HEIGHT / 2) / 2 ** zoom;
+      wrapCamera();
       prevX = e.clientX;
       prevY = e.clientY;
     }
   });
+  function wrapCamera() {
+    if (cameraX < -1)
+      cameraX += 2;
+    if (cameraX >= 1)
+      cameraX -= 2;
+    if (cameraY < -1)
+      cameraY += 2;
+    if (cameraY >= 1)
+      cameraY -= 2;
+  }
   canvas.addEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
-      const zoomDelta = e.deltaY < 0 ? 0.1 : -0.1;
+      const newZoom = Math.max(0, Math.min(14, zoom - 5e-3 * e.deltaY));
       const p = new Vector3(
         -1 + 2 * (e.clientX / WIDTH),
         1 - 2 * (e.clientY / HEIGHT)
       );
       const m1 = makeMatrix(cameraX, cameraY, zoom).invert();
-      const m2 = makeMatrix(cameraX, cameraY, zoom + zoomDelta).invert();
+      const m2 = makeMatrix(cameraX, cameraY, newZoom).invert();
       const p1 = p.clone().applyMatrix3(m1);
       const p2 = p.clone().applyMatrix3(m2);
       const translation = p1.sub(p2);
       cameraX += translation.x;
       cameraY += translation.y;
-      zoom += zoomDelta;
+      wrapCamera();
+      zoom = newZoom;
     },
     { passive: false }
   );
   gl.viewport(0, 0, WIDTH, HEIGHT);
   gl.useProgram(program);
-  var vao = gl.createVertexArray();
-  gl.bindVertexArray(vao);
-  var positionBuf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuf);
   var positionLoc = gl.getAttribLocation(program, "position");
   gl.enableVertexAttribArray(positionLoc);
-  gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
-  var triangleBuf = gl.createBuffer();
-  var url = "https://raw.githubusercontent.com/scdoshi/us-geojson/master/geojson/nation/US.geojson";
-  var triangles = [];
-  var vertices = [];
-  function load(rings) {
-    const data = import_earcut.default.flatten(
-      rings.map((ring) => ring.map(MercatorCoordinate.fromLngLat))
-    );
-    const base = vertices.length / 2;
-    vertices.push(...data.vertices);
-    const tri = (0, import_earcut.default)(data.vertices, data.holes, data.dimensions);
-    triangles.push(...tri.map((i) => i + base));
-  }
-  (async function() {
-    const res = await fetch(url);
-    const geojson = await res.json();
-    switch (geojson.geometry.type) {
-      case "Polygon":
-        load(geojson.geometry.coordinates);
-        break;
-      case "MultiPolygon":
-        geojson.geometry.coordinates.forEach((c) => load(c));
-        break;
+  var colorLoc = gl.getUniformLocation(program, "color");
+  var tileCache = {};
+  function compileTile(x, y, z) {
+    const key = `${x}-${y}-${z}`;
+    if (!tileCache[key]) {
+      tileCache[key] = [];
+      const worker = new Worker("worker.js");
+      worker.postMessage({ x, y, z });
+      worker.addEventListener(
+        "message",
+        (e) => {
+          requestIdleCallback(() => {
+            for (const {
+              tileId,
+              featureId,
+              color,
+              vertices,
+              triangles
+            } of e.data) {
+              const verticesBuf = gl.createBuffer();
+              const trianglesBuf = gl.createBuffer();
+              gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuf);
+              gl.bufferData(
+                gl.ARRAY_BUFFER,
+                new Float32Array(vertices),
+                gl.STATIC_DRAW
+              );
+              gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, trianglesBuf);
+              gl.bufferData(
+                gl.ELEMENT_ARRAY_BUFFER,
+                new Uint32Array(triangles),
+                gl.STATIC_DRAW
+              );
+              tileCache[tileId].push({
+                featureId,
+                drawCall(shiftX, shiftY) {
+                  gl.bindBuffer(gl.ARRAY_BUFFER, verticesBuf);
+                  gl.vertexAttribPointer(positionLoc, 2, gl.FLOAT, false, 0, 0);
+                  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, trianglesBuf);
+                  const m = makeMatrix(
+                    cameraX + shiftX * 2,
+                    cameraY - shiftY * 2,
+                    zoom
+                  );
+                  gl.uniformMatrix3fv(
+                    gl.getUniformLocation(program, "M"),
+                    false,
+                    m.elements
+                  );
+                  gl.uniform3fv(colorLoc, color);
+                  gl.drawElements(
+                    gl.TRIANGLES,
+                    triangles.length,
+                    gl.UNSIGNED_INT,
+                    0
+                  );
+                }
+              });
+            }
+            tileCache[e.data[0].tileId].sort(
+              (a, b) => a.featureId < b.featureId ? -1 : 1
+            );
+            worker.terminate();
+          });
+        }
+      );
     }
-  })();
+    if (!tileCache[key].length && z > 0) {
+      return compileTile(x >> 1, y >> 1, z - 1);
+    }
+    return tileCache[key];
+  }
   requestAnimationFrame(function render() {
     gl.useProgram(program);
-    gl.bindVertexArray(vao);
-    const m = makeMatrix(cameraX, cameraY, zoom);
-    gl.uniformMatrix3fv(
-      gl.getUniformLocation(program, "M"),
-      false,
-      // prettier-ignore
-      m.elements
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    const scale = WIDTH * 2 ** zoom;
+    const minMercatorX = mod(
+      ((1 + cameraX) / 2 * scale - WIDTH / 2) / scale,
+      1
     );
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triangleBuf);
-    gl.bufferData(
-      gl.ELEMENT_ARRAY_BUFFER,
-      new Uint32Array(triangles),
-      gl.STATIC_DRAW
+    const minLng = lngFromMercatorX(minMercatorX);
+    const maxMercatorX = mod(
+      ((1 + cameraX) / 2 * scale + WIDTH / 2) / scale,
+      1
     );
-    console.log("la", vertices.length, Math.max(...triangles));
-    gl.drawElements(gl.TRIANGLES, triangles.length, gl.UNSIGNED_INT, 0);
+    const maxLng = lngFromMercatorX(maxMercatorX);
+    const minMercatorY = mod(
+      ((1 - cameraY) / 2 * scale - HEIGHT / 2) / scale,
+      1
+    );
+    const maxLat = latFromMercatorY(minMercatorY);
+    const maxMercatorY = mod(
+      ((1 - cameraY) / 2 * scale + HEIGHT / 2) / scale,
+      1
+    );
+    const minLat = latFromMercatorY(maxMercatorY);
+    const z = Math.ceil(zoom);
+    const [centerX, centerY] = import_tilebelt.default.pointToTile(
+      lngFromMercatorX((1 + cameraX) / 2),
+      latFromMercatorY((1 - cameraY) / 2),
+      z
+    );
+    let [minX, minY] = import_tilebelt.default.pointToTile(minLng, maxLat, z);
+    let [maxX, maxY] = import_tilebelt.default.pointToTile(maxLng, minLat, z);
+    if (minX > centerX)
+      minX -= 2 ** z;
+    if (maxX < centerX)
+      maxX += 2 ** z;
+    if (minY > centerY)
+      minY -= 2 ** z;
+    if (maxY < centerY)
+      maxY += 2 ** z;
+    for (let x = minX - 1; x <= maxX + 1; x++) {
+      for (let y = minY - 1; y <= maxY + 1; y++) {
+        const normalizedX = mod(x, 2 ** z);
+        const normalizedY = mod(y, 2 ** z);
+        const tile = compileTile(normalizedX, normalizedY, z);
+        const deltaX = x - normalizedX;
+        const shiftX = deltaX ? -deltaX / Math.abs(deltaX) : 0;
+        const deltaY = y - normalizedY;
+        const shiftY = deltaY ? -deltaY / Math.abs(deltaY) : 0;
+        tile.forEach((f) => f.drawCall(shiftX, shiftY));
+      }
+    }
     requestAnimationFrame(render);
   });
+  function mod(a, b) {
+    return (a % b + b) % b;
+  }
 })();
 /*! Bundled license information:
 
