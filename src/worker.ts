@@ -40,7 +40,7 @@ async function compileTile(x: number, y: number, z: number) {
     }
     self.postMessage({ type: "done", data: compiled });
   } catch (e) {
-    console.debug(e);
+    console.warn(e);
   }
 
   function compileFeature(
@@ -53,7 +53,7 @@ async function compileTile(x: number, y: number, z: number) {
     const featureId = feature.id;
     const geojson = feature.toGeoJSON(x, y, z);
 
-    const color = [50, 100, 100].map((m) => (0.5 + 0.5 * (feature.id % m)) / m);
+    const color = [50, 100, 100].map((m) => 0.2 + (0.8 * (feature.id % m)) / m);
     const triangles: Array<number> = [];
     const vertices: Array<number> = [];
 
@@ -67,7 +67,7 @@ async function compileTile(x: number, y: number, z: number) {
       case "LineString":
       case "MultiLineString":
       default:
-        console.log("not implemented");
+        console.info("not implemented");
     }
 
     return { tileId, featureId, color, vertices, triangles };
