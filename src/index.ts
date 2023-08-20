@@ -1,5 +1,5 @@
 import { mat2d, vec2 } from "gl-matrix";
-import { createWebGLProgram, mod } from "./utils";
+import { createWebGLProgram, dist, mod } from "./utils";
 import type { CompiledTileFeature, Feature, WorkerMessage } from "./types";
 
 const worker = new Worker("worker.js");
@@ -74,14 +74,17 @@ function makeMatrix(cameraX: number, cameraY: number, zoom: number): mat2d {
 const tileCache: Record<string, Array<Feature>> = {};
 
 function loadTile(x: number, y: number, z: number): Array<Feature> {
-  const key = `${x}-${y}-${z}`;
+  let key = `${x}-${y}-${z}`;
   if (!tileCache[key]) {
     worker.postMessage({ x, y, z });
     tileCache[key] = [];
   }
-  return tileCache[key].length > 0 || z == 0
-    ? tileCache[key]
-    : loadTile(x >> 1, y >> 1, z - 1);
+  while (z > 0 && !tileCache[(key = `${x}-${y}-${z}`)]?.length) {
+    x >>= 1;
+    y >>= 1;
+    --z;
+  }
+  return tileCache[key] ?? [];
 }
 
 worker.addEventListener("message", (e: MessageEvent<WorkerMessage>) => {
@@ -180,6 +183,47 @@ canvas.addEventListener(
   },
   { passive: false }
 );
+
+const touchCache: Record<number, Touch> = {};
+
+canvas.addEventListener("touchstart", (e) => {
+  for (let touch of e.touches) {
+    touchCache[touch.identifier] = touch;
+  }
+});
+
+canvas.addEventListener("touchmove", (e) => {
+  e.preventDefault();
+  switch (e.targetTouches.length) {
+    case 1:
+      if (e.changedTouches.length) {
+        const touch = e.changedTouches[0];
+        const prevTouch = touchCache[e.changedTouches[0].identifier];
+        cameraX += (prevTouch.clientX - touch.clientX) / 256 / 2 ** zoom;
+        cameraY += (prevTouch.clientY - touch.clientY) / 256 / 2 ** zoom;
+      }
+      break;
+    case 2:
+      const touch1 = e.targetTouches[0];
+      const touch2 = e.targetTouches[1];
+      const curDist = dist(e.targetTouches[0], e.targetTouches[1]);
+      const prevDist = dist(
+        touchCache[touch1.identifier],
+        touchCache[touch2.identifier]
+      );
+      const zoomDelta = 0.01 * (curDist - prevDist);
+      const newZoom = Math.max(0, Math.min(MAX_ZOOM, zoom + zoomDelta));
+      const x = ((touch1.clientX + touch2.clientX) / 2 - WIDTH / 2) / 256;
+      const y = ((touch1.clientY + touch2.clientY) / 2 - HEIGHT / 2) / 256;
+      const scale = 2 ** (newZoom - zoom);
+      cameraX += (x * (scale - 1)) / 2 ** newZoom;
+      cameraY += (y * (scale - 1)) / 2 ** newZoom;
+      zoom = newZoom;
+  }
+  for (const touch of e.touches) {
+    touchCache[touch.identifier] = touch;
+  }
+});
 
 requestAnimationFrame(function render() {
   gl.useProgram(program);

@@ -45,3 +45,7 @@ export function createWebGLProgram(
 export function mod(a: number, b: number) {
   return ((a % b) + b) % b;
 }
+
+export function dist(a: Touch, b: Touch) {
+  return Math.sqrt((a.clientX - b.clientX) ** 2 + (a.clientY - b.clientY) ** 2);
+}

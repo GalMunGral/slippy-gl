@@ -27,7 +27,8 @@ async function compileTile(x: number, y: number, z: number) {
 
     // bail out if the zoom level changed after the tile was requested
     if (z != lastRequestedZ || !data) {
-      self.postMessage({ type: "abort", x, y, z });
+      // self.postMessage({ type: "abort", x, y, z });
+      console.debug("abort", x, y, z);
       return;
     }
 
