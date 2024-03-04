@@ -252,7 +252,7 @@ requestAnimationFrame(function render() {
   const minY = -(HEIGHT / 2) / 256 / 2 ** zoom + cameraY;
   const maxY = HEIGHT / 2 / 256 / 2 ** zoom + cameraY;
 
-  const Z = Math.round(zoom);
+  const Z = Math.ceil(zoom);
   const minTileX = Math.floor(minX * 2 ** Z);
   const maxTileX = Math.floor(maxX * 2 ** Z);
   const minTileY = Math.floor(minY * 2 ** Z);
