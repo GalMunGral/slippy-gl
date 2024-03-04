@@ -3,10 +3,8 @@
     "build": "node build.js && cp src/index.html dist"
   },
   "dependencies": {
-    "@mapbox/tilebelt": "^1.0.2",
     "@mapbox/vector-tile": "^1.3.1",
     "@types/earcut": "^2.1.1",
-    "@types/mapbox__tilebelt": "^1.0.0",
     "earcut": "^2.2.4",
     "gl-matrix": "^3.4.3",
     "pbf": "^3.2.1"
