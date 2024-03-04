@@ -5,6 +5,7 @@ import type { CompiledTileFeature, Feature, WorkerMessage } from "./types";
 const worker = new Worker("worker.js");
 
 const MAX_ZOOM = 18;
+const MIN_ZOOM = 1;
 const WIDTH = window.innerWidth;
 const HEIGHT = window.innerHeight;
 
@@ -73,12 +74,24 @@ function makeMatrix(cameraX: number, cameraY: number, zoom: number): mat2d {
 
 const tileCache: Record<string, Array<Feature>> = {};
 
-function loadTile(x: number, y: number, z: number): Array<Feature> {
-  let key = `${x}-${y}-${z}`;
-  if (!tileCache[key]) {
-    worker.postMessage({ x, y, z });
-    tileCache[key] = [];
-  }
+function loadTile(
+  x: number,
+  y: number,
+  z: number,
+  waitUntil: Promise<void>
+): Array<Feature> {
+  const key = `${x}-${y}-${z}`;
+  waitUntil.then(() => {
+    if (!tileCache[key]) {
+      tileCache[key] = [];
+      worker.postMessage({ x, y, z });
+    }
+  });
+  return loadTileFallback(x, y, z);
+}
+
+function loadTileFallback(x: number, y: number, z: number): Array<Feature> {
+  let key = "";
   while (z > 0 && !tileCache[(key = `${x}-${y}-${z}`)]?.length) {
     x >>= 1;
     y >>= 1;
@@ -173,7 +186,7 @@ canvas.addEventListener(
   (e) => {
     e.preventDefault();
     const zoomDelta = -0.005 * e.deltaY;
-    const newZoom = Math.max(0, Math.min(MAX_ZOOM, zoom + zoomDelta));
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom + zoomDelta));
     const x = (e.clientX - WIDTH / 2) / 256;
     const y = (e.clientY - HEIGHT / 2) / 256;
     const scale = 2 ** (newZoom - zoom);
@@ -225,6 +238,11 @@ canvas.addEventListener("touchmove", (e) => {
   }
 });
 
+let timer = -1;
+let prevCameraX = -1;
+let prevCameraY = -1;
+let prevZoom = -1;
+
 requestAnimationFrame(function render() {
   gl.useProgram(program);
   gl.clear(gl.COLOR_BUFFER_BIT);
@@ -234,17 +252,29 @@ requestAnimationFrame(function render() {
   const minY = -(HEIGHT / 2) / 256 / 2 ** zoom + cameraY;
   const maxY = HEIGHT / 2 / 256 / 2 ** zoom + cameraY;
 
-  const Z = Math.ceil(zoom);
+  const Z = Math.round(zoom);
   const minTileX = Math.floor(minX * 2 ** Z);
   const maxTileX = Math.floor(maxX * 2 ** Z);
   const minTileY = Math.floor(minY * 2 ** Z);
   const maxTileY = Math.floor(maxY * 2 ** Z);
 
+  // optimization: abort tile loading
+  if (zoom !== prevZoom || cameraX !== prevCameraX || cameraY !== prevCameraY) {
+    prevZoom = zoom;
+    prevCameraX = cameraX;
+    prevCameraY = cameraY;
+    clearTimeout(timer);
+  }
+
+  const waitUtil = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, 200);
+  });
+
   for (let x = minTileX - 1; x <= maxTileX + 1; x++) {
     for (let y = minTileY - 1; y <= maxTileY + 1; y++) {
       const X = mod(x, 2 ** Z);
       const Y = mod(y, 2 ** Z);
-      const tile = loadTile(X, Y, Z);
+      const tile = loadTile(X, Y, Z, waitUtil);
       const originX = Math.floor(x / 2 ** Z);
       const originY = Math.floor(y / 2 ** Z);
       tile.forEach((f) => f.drawCall(originX, originY));

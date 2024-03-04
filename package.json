@@ -1,7 +1,6 @@
 {
   "scripts": {
-    "dev": "node dev.js",
-    "build": "node build.js"
+    "build": "node build.js && cp src/index.html dist"
   },
   "dependencies": {
     "@mapbox/tilebelt": "^1.0.2",
